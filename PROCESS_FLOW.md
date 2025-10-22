@@ -1,264 +1,408 @@
-# Mindcraft 処理フロー
+# Mindcraft 処理フロー（階層別）
 
 ## 概要
-このドキュメントは、Mindcraftの処理の流れを初期化からメインループまで順番にまとめたものです。
+このドキュメントは、`agent.js`を中心に、Mindcraftの処理の流れを階層的にまとめたものです。
+処理を4つの階層に分けて、トップレベルから詳細まで段階的に説明します。
 
 ---
 
-## 1. 初期化フェーズ（起動時に一度だけ実行）
-
-### 1.1 プログラム起動
-**エントリーポイント: `main.js`**
+# 第1層: トップレベルの流れ
 
 ```
-main.js (1行目～)
-  ↓
-コマンドライン引数の解析
-  ↓
-設定ファイルの読み込み (settings.js)
-```
-
-### 1.2 MindServerの初期化
-**実行箇所: `src/mindcraft/mindcraft.js` の `Mindcraft.init()`**
-
-```
-Mindcraft.init()
-  ↓
-MindServerインスタンス作成（ポート8080）
-  ↓
-WebSocketサーバー起動
-```
-
-### 1.3 エージェント生成
-**実行箇所: `src/mindcraft/mindcraft.js` の `Mindcraft.createAgent()`**
-
-各プロファイルごとに以下が実行されます：
-
-```
-createAgent(profile)
-  ↓
-サブプロセス起動 (init_agent.js)
-  ↓
-MindServerへの接続
-  ↓
-Agentインスタンス生成
-```
-
-### 1.4 エージェント初期化（6つのフェーズ）
-**実行箇所: `src/agent/agent.js` の `Agent.start()`**
-
-```
-Phase 1: コンポーネント初期化
-  - ActionManager作成 (src/agent/action_manager.js)
-  - NPCコントローラー作成 (src/agent/npc/index.js)
-  - 各種マネージャーのセットアップ
-
-Phase 2: メモリ初期化
-  - 短期記憶の初期化 (src/agent/memory.js)
-  - 長期記憶の読み込み
-  - スキル記憶の読み込み
-
-Phase 3: タスクシステム初期化
-  - コマンドレジストリの登録 (src/agent/commands/)
-  - アクションレジストリの登録
-  - 動作モードの設定
-
-Phase 4: Minecraftボット初期化
-  - mineflayerボットの作成
-  - プラグインの読み込み（pathfinder, pvp, collectBlockなど）
-  - イベントリスナーの登録
-
-Phase 5: Minecraftサーバーへのログイン
-  - 認証処理
-  - サーバー接続
-
-Phase 6: スポーン完了
-  - ワールドへのスポーン
-  - 初期メッセージの送信
-  - イベントループの開始
+起動
+ ├─ 初期化フェーズ（1回のみ）
+ │   └─ Agent.start() を実行
+ └─ 実行フェーズ（継続的）
+     ├─ メインループ（300ms周期）
+     └─ イベント駆動処理（非同期）
 ```
 
 ---
 
-## 2. メインループフェーズ（継続的に実行）
+# 第2層: Agent.start() の内部構造
 
-### 2.1 メインイベントループ
-**実行箇所: `src/agent/agent.js:395-477` の `startEvents()`**
+**ファイル: `src/agent/agent.js:21-109`**
 
-**周期: 300ミリ秒ごと**
+## 2.1 初期化の流れ
+
+```
+Agent.start(load_mem, init_message, count_id)
+ │
+ ├─ [Phase 1] コンポーネント生成 (21-36行目)
+ │   ├─ ActionManager
+ │   ├─ Prompter
+ │   ├─ History
+ │   ├─ Coder
+ │   ├─ NPCController
+ │   ├─ MemoryBank
+ │   └─ SelfPrompter
+ │
+ ├─ [Phase 2] メモリ読み込み (39-42行目)
+ │   └─ history.load()
+ │
+ ├─ [Phase 3] タスク初期化 (43-51行目)
+ │   └─ new Task()
+ │
+ ├─ [Phase 4] ボット初期化 (53-56行目)
+ │   ├─ initBot()
+ │   └─ initModes()
+ │
+ ├─ [Phase 5] ログインイベント (58-67行目)
+ │   └─ bot.on('login', ...)
+ │
+ └─ [Phase 6] スポーンイベント (73-108行目)
+     ├─ VisionInterpreter生成
+     ├─ _setupEventHandlers() 呼び出し
+     ├─ startEvents() 呼び出し ← メインループ開始
+     └─ タスク初期化
+```
+
+---
+
+# 第3層: 実行フェーズの詳細
+
+## 3.1 メインループ: startEvents()
+
+**ファイル: `src/agent/agent.js:395-477`**
+
+### 3.1.1 イベントハンドラーの登録 (395-456行目)
+
+```
+startEvents()
+ │
+ ├─ カスタムイベント
+ │   ├─ 'time' → sunrise/noon/sunset/midnight
+ │   └─ 'health' → ダメージ検出
+ │
+ ├─ システムイベント
+ │   ├─ 'error' → エラーログ
+ │   ├─ 'end' → 切断処理
+ │   ├─ 'death' → アクション停止
+ │   ├─ 'kicked' → キック処理
+ │   ├─ 'messagestr' → 死亡メッセージ処理
+ │   └─ 'idle' → アイドル時の復帰処理
+ │
+ └─ NPCコントローラー初期化
+     └─ npc.init()
+```
+
+### 3.1.2 メインループの実装 (462-474行目)
 
 ```javascript
-setInterval(() => {
-  update()
-}, 300)
+const INTERVAL = 300; // 300ミリ秒周期
+
+setInterval(async () => {
+    await this.update(delta);
+}, INTERVAL);
 ```
 
-#### ループ内で実行される処理：
+**300msごとに実行される update() の内容:**
 
 ```
-【300msごとに実行】
-
-1. モード実行 (modes)
-   - 各動作モード（採掘、戦闘、探索など）の更新
-   - 実行箇所: agent.js内のモード管理
-
-2. セルフプロンプター実行
-   - 自律的な意思決定
-   - 実行箇所: src/agent/self_prompter.js
-   - LLMに現在の状態を渡して次のアクションを決定
-
-3. タスクチェック
-   - 実行中のタスクの状態確認
-   - タスク完了・失敗の処理
-   - 次のタスクの開始
-
-4. 環境監視
-   - 周囲のエンティティ検出
-   - インベントリの状態確認
-   - 体力・空腹度のチェック
+update(delta)  ← 479-483行目
+ ├─ bot.modes.update()        ← モードシステム更新
+ ├─ self_prompter.update()    ← 自律プロンプト更新
+ └─ checkTaskDone()           ← タスク完了チェック
 ```
 
-### 2.2 非同期メッセージ処理（イベント駆動）
-**実行箇所: `src/agent/agent.js` の `handleMessage()`**
+## 3.2 イベント駆動処理
 
-メッセージを受信した際に実行される4段階のパイプライン：
+### 3.2.1 イベントハンドラーのセットアップ
 
-```
-メッセージ受信
-  ↓
-Phase 1: バリデーション
-  - メッセージの妥当性チェック
-  - 送信者の確認
-  ↓
-Phase 2: コマンド検出
-  - コマンド形式（!command）の検出
-  - コマンドの解析
-  ↓
-Phase 3: 履歴への追加
-  - 会話履歴への保存
-  - メモリへの記録
-  ↓
-Phase 4: LLM処理
-  - プロンプト生成 (src/models/prompter.js)
-  - LLMへのリクエスト
-  - レスポンスの処理
-  - アクション実行 or チャット送信
-```
-
-### 2.3 アクション実行システム
-**実行箇所: `src/agent/action_manager.js`**
+**ファイル: `src/agent/agent.js:111-183` (_setupEventHandlers)**
 
 ```
-アクション実行リクエスト
-  ↓
-ActionManager.executeAction()
-  ↓
-1. アクション種別の判定
-2. 該当アクションの実行
-3. タイムアウト管理（最大10分）
-4. 成功/失敗の判定
-5. 結果の返却
+_setupEventHandlers(save_data, init_message)
+ │
+ ├─ チャットイベント登録 (146-152行目)
+ │   ├─ bot.on('whisper', respondFunc)
+ │   └─ bot.on('chat', respondFunc)
+ │
+ ├─ Auto-eat設定 (155-159行目)
+ │
+ ├─ メモリ復元処理 (161-176行目)
+ │   └─ self_prompter.handleLoad()
+ │
+ └─ 初期メッセージ送信 (177-182行目)
+     └─ handleMessage() または openChat()
 ```
 
-### 2.4 ボットイベント処理
-**実行箇所: `src/agent/agent.js` のイベントハンドラー群**
-
-Minecraftボットからのイベントに反応：
+### 3.2.2 メッセージ受信の流れ
 
 ```
-- physicsTick: 物理演算の更新
-- chat: チャットメッセージの受信
-- entityHurt: エンティティのダメージ
-- entityDead: エンティティの死亡
-- health: 体力変化
-- death: 自身の死亡
-- kicked: サーバーからのキック
-- error: エラー発生
+respondFunc(username, message)  ← 121-142行目
+ │
+ ├─ バリデーション
+ │   ├─ 空メッセージチェック
+ │   ├─ 自分自身からのメッセージを無視
+ │   ├─ only_chat_withリストチェック
+ │   └─ ignore_messagesチェック
+ │
+ ├─ 翻訳処理
+ │   └─ handleEnglishTranslation()
+ │
+ └─ メッセージ処理
+     └─ handleMessage() 呼び出し
 ```
 
 ---
 
-## 3. 処理フロー全体図
+# 第4層: 詳細な処理の内部
+
+## 4.1 handleMessage() の完全な流れ
+
+**ファイル: `src/agent/agent.js:218-346`**
+
+### 構造:
 
 ```
-[起動]
-  │
-  ├─ main.js
-  │   └─ Mindcraft.init()
-  │       └─ MindServer起動（8080ポート）
-  │
-  ├─ Mindcraft.createAgent() ×プロファイル数
-  │   └─ init_agent.js（サブプロセス）
-  │       └─ Agent.start()
-  │           ├─ [1] コンポーネント初期化
-  │           ├─ [2] メモリ初期化
-  │           ├─ [3] タスクシステム初期化
-  │           ├─ [4] Botクライアント初期化
-  │           ├─ [5] サーバーログイン
-  │           └─ [6] スポーン完了
-  │
-  ↓
-[メインループ開始]
-  │
-  ├─ 【300msごと】startEvents()
-  │   └─ update()
-  │       ├─ モード実行
-  │       ├─ セルフプロンプター実行
-  │       └─ タスク状態チェック
-  │
-  ├─ 【イベント駆動】メッセージ受信
-  │   └─ handleMessage()
-  │       ├─ バリデーション
-  │       ├─ コマンド検出
-  │       ├─ 履歴保存
-  │       └─ LLM処理 → アクション実行
-  │
-  └─ 【イベント駆動】Botイベント
-      └─ chat, health, death, etc.
+handleMessage(source, message, max_responses)
+ │
+ ├─ [準備] タスク完了チェック (219行目)
+ │   └─ checkTaskDone()
+ │
+ ├─ [検証] 入力の妥当性チェック (220-223行目)
+ │
+ ├─ [設定] レスポンス回数の決定 (225-231行目)
+ │   └─ max_responses設定
+ │
+ ├─ [判定] メッセージ送信元の判定 (233-234行目)
+ │   ├─ self_prompt判定
+ │   └─ from_other_bot判定
+ │
+ ├─ [コマンド] ユーザーコマンドの処理 (236-254行目)
+ │   ├─ containsCommand() でコマンド検出
+ │   ├─ commandExists() で存在確認
+ │   └─ executeCommand() で実行
+ │
+ ├─ [翻訳] メッセージの英語翻訳 (260行目)
+ │
+ ├─ [ログ] 行動ログの追加 (265-273行目)
+ │   └─ bot.modes.flushBehaviorLog()
+ │
+ ├─ [履歴] 履歴への追加 (276-277行目)
+ │   └─ history.add()
+ │
+ └─ [ループ] レスポンスループ (281-343行目)
+     └─ for (i=0; i<max_responses; i++)
+         ├─ 中断チェック
+         ├─ LLMプロンプト実行
+         ├─ レスポンス解析
+         └─ コマンド実行 or 会話応答
+```
+
+### 4.1.1 レスポンスループの詳細 (281-343行目)
+
+```
+for (i=0; i<max_responses; i++)
+ │
+ ├─ [チェック] 中断判定 (282行目)
+ │   └─ checkInterrupt()
+ │
+ ├─ [取得] 履歴取得 (283行目)
+ │   └─ history.getHistory()
+ │
+ ├─ [LLM] プロンプト実行 (284行目)
+ │   └─ prompter.promptConvo(history)
+ │       ↓
+ │       LLMがレスポンスを生成
+ │
+ ├─ [解析] レスポンス内容の確認 (288-291行目)
+ │   └─ 空レスポンスならループ終了
+ │
+ ├─ [検出] コマンド検出 (293行目)
+ │   └─ containsCommand(res)
+ │
+ └─ [分岐] コマンドの有無で分岐
+     │
+     ├─ [コマンドあり] (295-335行目)
+     │   ├─ truncCommandMessage() でトリミング
+     │   ├─ 履歴に追加
+     │   ├─ commandExists() で存在確認
+     │   ├─ 中断チェック
+     │   ├─ self_prompter.handleUserPromptedCmd()
+     │   ├─ routeResponse() で応答表示
+     │   ├─ executeCommand() でコマンド実行
+     │   └─ 実行結果を履歴に追加
+     │
+     └─ [会話応答] (336-340行目)
+         ├─ 履歴に追加
+         ├─ routeResponse() で応答
+         └─ ループ終了
+```
+
+## 4.2 routeResponse() の処理
+
+**ファイル: `src/agent/agent.js:348-366`**
+
+```
+routeResponse(to_player, message)
+ │
+ ├─ shut_upチェック (349行目)
+ │
+ ├─ 送信先の判定 (350-355行目)
+ │   └─ system/selfの場合、last_senderにリダイレクト
+ │
+ └─ 送信方法の分岐
+     │
+     ├─ [他エージェント宛て] (357-360行目)
+     │   └─ convoManager.sendToBot()
+     │
+     └─ [オープンチャット] (361-365行目)
+         └─ openChat()
+```
+
+## 4.3 openChat() の処理
+
+**ファイル: `src/agent/agent.js:368-393`**
+
+```
+openChat(message)
+ │
+ ├─ [翻訳] コマンド部分を除いて翻訳 (369-378行目)
+ │   ├─ containsCommand() でコマンド検出
+ │   ├─ コマンド前の部分のみ翻訳
+ │   └─ handleTranslation()
+ │
+ ├─ [整形] 改行をスペースに変換 (379行目)
+ │
+ └─ [送信] 送信方法の分岐 (381-392行目)
+     │
+     ├─ [only_chat_with設定あり] (381-384行目)
+     │   └─ bot.whisper() で個別送信
+     │
+     └─ [通常送信] (386-392行目)
+         ├─ speak() で音声出力
+         ├─ bot.chat() でゲーム内送信
+         └─ sendOutputToServer() でサーバー送信
+```
+
+## 4.4 update() の詳細
+
+**ファイル: `src/agent/agent.js:479-483`**
+
+```
+update(delta)
+ │
+ ├─ [モード] bot.modes.update()
+ │   └─ 各モード（採掘、戦闘など）の状態更新
+ │
+ ├─ [自律] self_prompter.update(delta)
+ │   └─ 自律的な行動の判断と実行
+ │
+ └─ [タスク] checkTaskDone()
+     └─ タスク完了判定と終了処理
 ```
 
 ---
 
-## 4. 主要ファイルと役割
+# 第5層: 主要コンポーネントの詳細
 
-| ファイル | 役割 | 初期化 | ループ |
-|---------|------|--------|--------|
-| `main.js` | エントリーポイント | ✓ | |
-| `src/mindcraft/mindcraft.js` | システム初期化 | ✓ | |
-| `src/mindcraft/mindserver.js` | 通信ハブ | ✓ | ✓ |
-| `src/agent/agent.js` | エージェントメインロジック | ✓ | ✓ |
-| `src/agent/action_manager.js` | アクション実行管理 | ✓ | ✓ |
-| `src/agent/self_prompter.js` | 自律意思決定 | | ✓ |
-| `src/agent/commands/` | コマンド実装 | ✓ | ✓ |
-| `src/models/prompter.js` | LLMプロンプト生成 | | ✓ |
-| `src/agent/memory.js` | 記憶管理 | ✓ | ✓ |
+## 5.1 ActionManager
+
+**ファイル: `src/agent/action_manager.js`**
+
+```
+ActionManager
+ ├─ executeAction(command)
+ │   ├─ タイムアウト設定（最大10分）
+ │   ├─ アクション実行
+ │   └─ 結果返却
+ │
+ ├─ cancelResume()
+ ├─ resumeAction()
+ └─ stop()
+```
+
+## 5.2 SelfPrompter
+
+**ファイル: `src/agent/self_prompter.js`**
+
+```
+SelfPrompter
+ ├─ update(delta)
+ │   └─ 一定間隔で自律的にプロンプト実行
+ │
+ ├─ shouldInterrupt()
+ ├─ handleUserPromptedCmd()
+ └─ stop()
+```
+
+## 5.3 History
+
+**ファイル: `src/agent/history.js`**
+
+```
+History
+ ├─ add(source, message)
+ ├─ getHistory()
+ ├─ save()
+ └─ load()
+```
+
+## 5.4 ConvoManager
+
+**ファイル: `src/agent/conversation.js`**
+
+```
+ConvoManager
+ ├─ sendToBot(agent_name, message)
+ ├─ receiveFromBot(agent_name, msg_package)
+ ├─ inConversation(agent_name)
+ └─ endAllConversations()
+```
 
 ---
 
-## 5. タイミングチャート
+# 階層別実行タイミング
 
+## 第1層: 起動〜初期化完了
 ```
-時刻 | 処理内容
------|----------
-T=0ms      | プログラム起動 (main.js)
-T=100ms    | MindServer起動
-T=200ms    | Agent生成開始
-T=500ms    | Minecraftボット接続開始
-T=2000ms   | ログイン完了
-T=3000ms   | スポーン完了、初期化終了
------------|-------------------------------------
-T=3000ms   | メインループ開始
-T=3300ms   | 1回目のupdate()実行
-T=3600ms   | 2回目のupdate()実行
-T=3900ms   | 3回目のupdate()実行
-...        | 300msごとにupdate()が永続実行
+T=0ms      起動
+T=3000ms   初期化完了、メインループ開始
+```
+
+## 第2層: メインループ開始後
+```
+T=3000ms   startEvents() 実行
+T=3300ms   1回目の update()
+T=3600ms   2回目の update()
+...        以降300msごと
+```
+
+## 第3層: イベント駆動（非同期）
+```
+随時       chat/whisperイベント
+           → respondFunc()
+           → handleMessage()
+```
+
+## 第4層: handleMessage内部
+```
+handleMessage() 実行中:
+ - プロンプト生成: 数百ms〜数秒
+ - LLM応答待機: 1〜10秒程度
+ - コマンド実行: 数ms〜数分
 ```
 
 ---
 
-## まとめ
+# まとめ: 階層構造
 
-- **初期化**: `main.js` → `Mindcraft.init()` → `Agent.start()`（6フェーズ）
-- **メインループ**: `startEvents()` が300msごとに `update()` を実行
-- **イベント処理**: メッセージやボットイベントは非同期で処理
-- **中心となるファイル**: `src/agent/agent.js`（395-477行目がメインループ）
+```
+第1層: 起動 → 初期化 → 実行
+         ↓
+第2層: Agent.start() → startEvents() + update()
+         ↓
+第3層: イベントハンドラー + メインループ（300ms）
+         ↓
+第4層: handleMessage() → レスポンスループ → コマンド実行
+         ↓
+第5層: 各コンポーネント（ActionManager, SelfPrompter等）
+```
+
+**中心ファイル**: `src/agent/agent.js`
+- 初期化: 21-109行目
+- イベントセットアップ: 111-183行目
+- メッセージ処理: 218-346行目
+- メインループ: 395-477行目
