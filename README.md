@@ -25,6 +25,49 @@ Do not connect this bot to public servers with coding enabled. This project allo
 - [Node.js Installed](https://nodejs.org/) (at least v18)
 - One of these: [OpenAI API Key](https://openai.com/blog/openai-api) | [Gemini API Key](https://aistudio.google.com/app/apikey) | [Anthropic API Key](https://docs.anthropic.com/claude/docs/getting-access-to-claude) | [Replicate API Key](https://replicate.com/) | [Hugging Face API Key](https://huggingface.co/) | [Groq API Key](https://console.groq.com/keys) | [Ollama Installed](https://ollama.com/download). | [Mistral API Key](https://docs.mistral.ai/getting-started/models/models_overview/) | [Qwen API Key [Intl.]](https://www.alibabacloud.com/help/en/model-studio/developer-reference/get-api-key)/[[cn]](https://help.aliyun.com/zh/model-studio/getting-started/first-api-call-to-qwen?) | [Novita AI API Key](https://novita.ai/settings?utm_source=github_mindcraft&utm_medium=github_readme&utm_campaign=link#key-management) | [Cerebras API Key](https://cloud.cerebras.ai) | [Mercury API](https://platform.inceptionlabs.ai/docs)
 
+## Features
+
+Mindcraft provides a comprehensive AI agent framework for Minecraft with 55+ commands and advanced capabilities:
+
+### Core Capabilities
+- **🤖 Autonomous Behavior**: Self-prompting system allows bots to set and pursue their own goals
+- **💬 Natural Conversation**: Communicate naturally with the bot in any language (auto-translation supported)
+- **👁️ Vision**: Bots can analyze screenshots and respond to visual information
+- **💾 Persistent Memory**: Multi-layered memory system (short-term, long-term, and skill memory)
+- **🧠 Code Generation**: Create custom actions with `!newAction` - bot writes and executes JavaScript code (sandboxed)
+- **👥 Multi-Agent Collaboration**: Multiple bots can work together and communicate
+
+### Available Commands (55+)
+- **Navigation** (10 commands): `!goToPlayer`, `!followPlayer`, `!goToCoordinates`, `!searchForBlock`, etc.
+- **Building & Crafting** (6 commands): `!placeHere`, `!collectBlocks`, `!craftRecipe`, `!smeltItem`, etc.
+- **Inventory Management** (7 commands): `!equip`, `!consume`, `!givePlayer`, `!putInChest`, `!takeFromChest`, etc.
+- **Combat** (2 commands): `!attack`, `!attackPlayer`
+- **Information Queries** (14 commands): `!stats`, `!inventory`, `!nearbyBlocks`, `!entities`, `!craftable`, etc.
+- **Social & Communication** (4 commands): `!startConversation`, `!endConversation`, `!lookAtPlayer`, etc.
+- **Memory & Goals** (4 commands): `!rememberHere`, `!goal`, `!endGoal`, `!setMode`
+- **System** (5 commands): `!newAction`, `!stop`, `!stfu`, `!restart`, `!clearChat`
+
+### Automatic Behaviors (10 Modes)
+Bots automatically react to the environment with configurable modes:
+- `self_preservation`: Avoid drowning, burning, falling
+- `self_defense`: Fight back when attacked
+- `hunting`: Hunt animals when idle
+- `item_collecting`: Automatically pick up nearby items
+- `torch_placing`: Place torches in dark areas
+- `cowardice`: Run from dangerous mobs
+- `unstuck`: Escape when stuck
+- And more...
+
+### Advanced Features
+- **Task System**: Run structured tasks for building, collecting, or cooking with automatic validation
+- **Browser Viewer**: Watch the bot's first-person view in real-time via web browser
+- **NPC Controller**: Manage villager trading, breeding, and construction tasks
+- **Text-to-Speech**: Bots can speak responses using OpenAI or Google TTS
+- **Translation**: Automatic translation between languages
+- **20+ LLM Providers**: Support for OpenAI, Anthropic, Google, Groq, Ollama, and many more
+
+For complete feature documentation, command syntax, and configuration options, see [FEATURES.md](FEATURES.md).
+
 ## Install and Run
 
 1. Make sure you have the requirements above.
